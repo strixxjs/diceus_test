@@ -1,10 +1,8 @@
-import os 
+import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from PIL import Image
 import pytesseract
-
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -140,7 +138,12 @@ async def handle_invalid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Я приймаю лише фото паспорта та авто-документа. Надішліть, будь ласка, зображення.")
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8").build()
+    TOKEN = os.getenv("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8")
+    if not TOKEN:
+        print("ERROR: TELEGRAM_TOKEN environment variable not set.")
+        exit(1)
+
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reply))
