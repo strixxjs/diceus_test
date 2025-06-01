@@ -7,7 +7,7 @@ import pytesseract
 
 load_dotenv()
 
-TOKEN = os.getenv("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     print("❌ ERROR: TELEGRAM_TOKEN environment variable not set.")
     exit(1)
