@@ -1,6 +1,6 @@
 [phases.setup]
 nixPkgs = [
-  "tesseract",
-  "tesseractPackages.ukrainian",
-  "tesseractPackages.english"
+  "tesseract"
+  "tesseract-data-eng"
+  "tesseract-data-ukr"
 ]
