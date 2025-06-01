@@ -31,8 +31,6 @@ cd insurance-bot
 pip install -r requirements.txt
 
 ```
-Створи .env файл або встанови змінну середовища:
-
 Запусти бота:
 
 ```
