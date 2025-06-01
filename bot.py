@@ -137,11 +137,11 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_invalid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Я приймаю лише фото паспорта та авто-документа. Надішліть, будь ласка, зображення.")
 
-if __name__ == '__main__':
-    TOKEN = os.getenv("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8")
-    if not TOKEN:
-        print("ERROR: TELEGRAM_TOKEN environment variable not set.")
-        exit(1)
+# if __name__ == '__main__':
+#     TOKEN = os.getenv("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8")
+#     if not TOKEN:
+#         print("ERROR: TELEGRAM_TOKEN environment variable not set.")
+#         exit(1)
 
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
