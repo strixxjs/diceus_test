@@ -1,21 +1,17 @@
-import os
+import os 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from PIL import Image
 import pytesseract
 
-# 🔧 Налаштування Tesseract OCR (тільки для Windows)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # змінити шлях, якщо інший
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-# 📁 Папка для збереження зображень і полісів
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-# 📊 Стани користувача
-user_documents = {}   # user_id: {passport, vehicle}
-user_agreement = {}   # user_id: confirmed/rejected/waiting
+user_documents = {}
+user_agreement = {}
 
-# 🧠 OCR: зчитування тексту з фото
 def extract_text_from_image(image_path):
     try:
         img = Image.open(image_path)
@@ -24,22 +20,33 @@ def extract_text_from_image(image_path):
     except Exception as e:
         return f"❌ Помилка під час розпізнавання: {e}"
 
+def clean_text(text):
+    lines = text.splitlines()
+    cleaned = [line.strip() for line in lines if line.strip()]
+    return '\n'.join(cleaned)
+
 def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: str) -> str:
+    passport_text = clean_text(passport_text)
+    vehicle_text = clean_text(vehicle_text)
+
     policy_content = (
-        "===== СТРАХОВИЙ ПОЛІС =====\n\n"
-        f"👤 Дані з паспорта:\n{passport_text}\n"
-        f"🚗 Дані з документа на авто:\n{vehicle_text}\n\n"
+        "========== СТРАХОВИЙ ПОЛІС ==========\n\n"
+        "👤 ПАСПОРТНІ ДАНІ:\n"
+        f"{passport_text}\n\n"
+        "🚗 ДАНІ АВТОМОБІЛЯ:\n"
+        f"{vehicle_text}\n\n"
         "📅 Дата оформлення: сьогодні\n"
-        "💰 Сума: 1000 ГРН\n"
-        "📄 Поліс видано автоматизованою системою\n"
-        "============================="
+        "💰 Сума: 100 USD\n"
+        "📄 Поліс видано автоматизованою системою\n\n"
+        "======================================"
     )
 
     policy_path = os.path.join(IMAGE_DIR, f"{user_id}_policy.txt")
     with open(policy_path, "w", encoding="utf-8") as f:
         f.write(policy_content)
-    
+
     return policy_path
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -99,7 +106,7 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if status == "awaiting_confirmation":
         if text == "так":
             user_agreement[user_id] = "confirmed"
-            await update.message.reply_text("💵 Страховка коштує 1000 ГРН. Згодні? Відповідай: Так / Ні")
+            await update.message.reply_text("💵 Страховка коштує 100 usd. Згодні? Відповідай: Так / Ні")
             user_agreement[user_id] = "awaiting_price"
         elif text == "ні":
             user_agreement[user_id] = "rejected"
@@ -129,9 +136,13 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Не розумію. Напиши /start щоб почати спочатку.")
 
+async def handle_invalid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Я приймаю лише фото паспорта та авто-документа. Надішліть, будь ласка, зображення.")
+
 if __name__ == '__main__':
     app = ApplicationBuilder().token("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8").build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reply))
+    app.add_handler(MessageHandler(~filters.PHOTO & ~filters.TEXT & ~filters.COMMAND, handle_invalid))
     app.run_polling()
