@@ -4,6 +4,4 @@ nixpacksVersion = "1.16.0"
 [phases.setup]
 nixPkgs = [
   "tesseract"
-  "tesseract-data-eng"
-  "tesseract-data-ukr"
 ]
