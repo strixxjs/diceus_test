@@ -1,8 +1,16 @@
 import os
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from PIL import Image
 import pytesseract
+
+load_dotenv()
+
+TOKEN = os.getenv("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8")
+if not TOKEN:
+    print("❌ ERROR: TELEGRAM_TOKEN environment variable not set.")
+    exit(1)
 
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -44,7 +52,6 @@ def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: st
         f.write(policy_content)
 
     return policy_path
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -103,9 +110,8 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if status == "awaiting_confirmation":
         if text == "так":
-            user_agreement[user_id] = "confirmed"
-            await update.message.reply_text("💵 Страховка коштує 100 usd. Згодні? Відповідай: Так / Ні")
             user_agreement[user_id] = "awaiting_price"
+            await update.message.reply_text("💵 Страховка коштує 100 usd. Згодні? Відповідай: Так / Ні")
         elif text == "ні":
             user_agreement[user_id] = "rejected"
             user_documents[user_id] = {"passport": None, "vehicle": None}
@@ -138,11 +144,6 @@ async def handle_invalid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Я приймаю лише фото паспорта та авто-документа. Надішліть, будь ласка, зображення.")
 
 if __name__ == '__main__':
-    TOKEN = os.getenv("7751870205:AAEKIglHGkeDAF7oDZaH5Udfsk9lkCy9gy8")
-#     if not TOKEN:
-#         print("ERROR: TELEGRAM_TOKEN environment variable not set.")
-#         exit(1)
-
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
