@@ -31,6 +31,20 @@ def extract_text_from_image(image_path, lang='eng+ukr'):
     except Exception as e:
         return f"❌ Помилка під час розпізнавання: {e}"
 
+def extract_from_mrz(text):
+    lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 40]
+    if len(lines) >= 2 and lines[0].startswith("P<"):
+        surname_name = lines[0][5:].replace('<', ' ').strip()
+        passport_number = lines[1][0:9].strip()
+        birth_date_raw = lines[1][13:19].strip()
+        birth_date = f"{birth_date_raw[4:6]}.{birth_date_raw[2:4]}.19{birth_date_raw[0:2]}"
+        return {
+            "name": surname_name,
+            "passport_number": passport_number,
+            "birth_date": birth_date
+        }
+    return None
+
 def clean_text(text):
     lines = text.splitlines()
     cleaned = [re.sub(r'[^А-Яа-яA-Za-z0-9 .,/-]', '', line.strip()) for line in lines if line.strip()]
@@ -143,7 +157,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_documents[user_id]["vehicle"] = file_path
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
-        raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
+        raw_passport_ocr = extract_text_from_image(user_documents[user_id]["passport"], lang='eng')
+        mrz_data = extract_from_mrz(raw_passport_ocr)
+        if mrz_data:
+            raw_passport = f"ПІБ: {mrz_data['name']}\nНомер паспорта: {mrz_data['passport_number']}\nДата народження: {mrz_data['birth_date']}"
+        else:
+            raw_passport = clean_text(raw_passport_ocr)
         raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
         user_documents[user_id]["passport_raw"] = raw_passport
         user_documents[user_id]["vehicle_raw"] = raw_vehicle
