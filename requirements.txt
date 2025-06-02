@@ -3,4 +3,5 @@ pillow
 pytesseract
 python-dotenv
 rapidfuzz
-openai
+openai>=1.0.0
+tqdm
