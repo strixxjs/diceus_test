@@ -77,33 +77,47 @@ async def ai_completion(prompt: str, user_id: int) -> str:
     try:
         if user_id not in user_openaichat:
             user_openaichat[user_id] = [
-                {"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування. Інструкції: "
-                "1. Попроси користувача надіслати фото паспорта та документа на авто.\n"
-                "2. Після отримання фото, зчитай текст з документів і запитай підтвердження.\n"
-                "3. Якщо користувач погоджується, повідом про вартість страховки та запитай згоду.\n"
-                "4. Якщо користувач погоджується, згенеруй страховий поліс і надішли його."
-                "Проси лише фото документів! І не пиши щоб люди надавали тобі данні з документів в текстовому вигляді.",
-                }
+                {"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування. Інструкції: \n1. Попроси користувача надіслати фото паспорта та документа на авто.\n2. Після отримання фото, зчитай текст з документів і запитай підтвердження.\n3. Якщо користувач погоджується, повідом про вартість страховки та запитай згоду.\n4. Якщо користувач погоджується, згенеруй страховий поліс і надішли його. Проси лише фото документів! І не пиши щоб люди надавали тобі данні з документів в текстовому вигляді."}
             ]
-
         user_openaichat[user_id].append({"role": "user", "content": prompt})
-
         response = client.chat.completions.create(
             model="gpt-4.1-nano",
             messages=user_openaichat[user_id],
             temperature=0.7,
             max_tokens=300,
         )
-
         reply = response.choices[0].message.content.strip()
         user_openaichat[user_id].append({"role": "assistant", "content": reply})
         return reply
-
     except Exception as e:
-        import traceback
-        print("❌ OpenAI API error:")
-        traceback.print_exc()
         return "⚠️ Виникла помилка з AI. Спробуй пізніше."
+
+async def extract_structured_data_from_ocr(passport_text_raw: str, vehicle_text_raw: str, user_id: int) -> str:
+    prompt = f"""
+Ось текст з двох документів. Текст має помилки, це результат OCR з фото.
+Проаналізуй і виправ помилки. Створи структуровану відповідь, яка містить такі поля:
+
+👤 ПАСПОРТНІ ДАНІ:
+- ПІБ
+- Серія і номер паспорта (якщо є)
+- Дата народження або інші ідентифікаційні дані (якщо є)
+
+🚗 ДАНІ АВТО:
+- Марка та модель авто
+- Рік випуску
+- VIN або держномер (якщо є)
+- Штат реєстрації (наприклад, Massachusetts)
+
+Поверни лише зрозумілий звіт для користувача. Не додавай пояснень.  
+Ось дані:
+
+=== ПАСПОРТ ===
+{passport_text_raw}
+
+=== АВТО ===
+{vehicle_text_raw}
+"""
+    return await ai_completion(prompt, user_id)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -131,16 +145,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
         raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
         raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
-        passport_text = clean_text(raw_passport)
-        vehicle_text_lines = clean_text(raw_vehicle).splitlines()
-        vehicle_text = '\n'.join([normalize_text_line(line) for line in vehicle_text_lines])
-        response = (
-            "📄 *Паспорт:*\n" + passport_text + "\n\n" +
-            "🚗 *Документ на авто:*\n" + vehicle_text + "\n\n" +
-            "Все правильно? Відповідай: Так / Ні"
-        )
+        user_documents[user_id]["passport_raw"] = raw_passport
+        user_documents[user_id]["vehicle_raw"] = raw_vehicle
+        structured_info = await extract_structured_data_from_ocr(raw_passport, raw_vehicle, user_id)
         user_agreement[user_id] = "awaiting_confirmation"
-        await update.message.reply_text(response)
+        await update.message.reply_text("🔍 Ось що я зміг зчитати з ваших документів:\n\n" + structured_info + "\n\nВсе правильно? Відповідай: Так / Ні")
 
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -163,8 +172,8 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif status == "awaiting_price":
         if text == "так":
             await update.message.reply_text("✅ Страховка оформлена! Генерую поліс...")
-            passport_text = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
-            vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
+            passport_text = user_documents[user_id].get("passport_raw", "")
+            vehicle_text = user_documents[user_id].get("vehicle_raw", "")
             policy_path = generate_insurance_policy(user_id, passport_text, vehicle_text)
             with open(policy_path, "rb") as f:
                 await update.message.reply_document(f, filename="insurance_policy.txt")
