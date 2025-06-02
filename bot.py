@@ -5,6 +5,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from PIL import Image
 import pytesseract
+from rapidfuzz import fuzz, process
 
 load_dotenv()
 
@@ -19,6 +20,9 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 user_documents = {}
 user_agreement = {}
 
+known_brands = ["Toyota", "Ford", "Honda", "BMW", "Mercedes", "Nissan", "Audi", "Kia", "Hyundai", "Chevrolet", "Volkswagen", "Mazda", "Subaru", "Tesla", "Jeep"]
+known_states = ["California", "Massachusetts", "New York", "Florida", "Texas", "Illinois", "Ohio", "Pennsylvania", "Georgia", "Nevada", "Arizona", "Colorado"]
+
 def extract_text_from_image(image_path, lang='eng+ukr'):
     try:
         img = Image.open(image_path)
@@ -32,9 +36,25 @@ def clean_text(text):
     cleaned = [re.sub(r'[^А-Яа-яA-Za-z0-9 .,/-]', '', line.strip()) for line in lines if line.strip()]
     return '\n'.join(cleaned)
 
+def normalize_text_line(line):
+    words = line.split()
+    normalized = []
+    for word in words:
+        brand_match = process.extractOne(word, known_brands, scorer=fuzz.ratio)
+        state_match = process.extractOne(word, known_states, scorer=fuzz.ratio)
+
+        if brand_match and brand_match[1] >= 80:
+            normalized.append(brand_match[0])
+        elif state_match and state_match[1] >= 80:
+            normalized.append(state_match[0])
+        else:
+            normalized.append(word)
+    return ' '.join(normalized)
+
 def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: str) -> str:
     passport_text = clean_text(passport_text)
-    vehicle_text = clean_text(vehicle_text)
+    vehicle_text_lines = clean_text(vehicle_text).splitlines()
+    vehicle_text = '\n'.join([normalize_text_line(line) for line in vehicle_text_lines])
 
     policy_content = (
         "========== СТРАХОВИЙ ПОЛІС ==========\n\n"
@@ -88,12 +108,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
 
-        passport_text = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
-        vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
+        raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
+        raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
+
+        passport_text = clean_text(raw_passport)
+        vehicle_text_lines = clean_text(raw_vehicle).splitlines()
+        vehicle_text = '\n'.join([normalize_text_line(line) for line in vehicle_text_lines])
 
         response = (
-            "📄 *Паспорт:*\n" + clean_text(passport_text) + "\n\n" +
-            "🚗 *Документ на авто:*\n" + clean_text(vehicle_text) + "\n\n" +
+            "📄 *Паспорт:*\n" + passport_text + "\n\n" +
+            "🚗 *Документ на авто:*\n" + vehicle_text + "\n\n" +
             "Все правильно? Відповідай: Так / Ні"
         )
         user_agreement[user_id] = "awaiting_confirmation"
