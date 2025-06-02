@@ -55,11 +55,9 @@ def extract_data_from_mrz(text: str) -> dict:
     lines = [line for line in text.strip().splitlines() if line.strip()]
     if len(lines) < 2:
         return {}
-
+    result = {}
     line1 = lines[0]
     line2 = lines[1]
-
-    result = {}
     if line1.startswith("P<"):
         try:
             parts = line1.split("<<")
@@ -67,7 +65,6 @@ def extract_data_from_mrz(text: str) -> dict:
             result["ПІБ"] = f"{last_first_name[1]} {last_first_name[0]}".strip()
         except:
             pass
-
     try:
         passport_number = line2[0:9].replace("<", "")
         birth_date = line2[13:19]
@@ -75,7 +72,6 @@ def extract_data_from_mrz(text: str) -> dict:
         result["Дата народження"] = f"{birth_date[:2]}.{birth_date[2:4]}.19{birth_date[4:6]}"
     except:
         pass
-
     return result
 
 def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: str) -> str:
@@ -105,7 +101,7 @@ async def ai_completion(prompt: str, user_id: int) -> str:
     try:
         if user_id not in user_openaichat:
             user_openaichat[user_id] = [
-                {"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування. Інструкції: \n1. Попроси користувача надіслати фото паспорта та документа на авто.\n2. Після отримання фото, зчитай текст з документів і запитай підтвердження.\n3. Якщо користувач погоджується, повідом про вартість страховки та запитай згоду.\n4. Якщо користувач погоджується, згенеруй страховий поліс і надішли його. Проси лише фото документів! І не пиши щоб люди надавали тобі данні з документів в текстовому вигляді.Обов'язково після кожної відповіді запитай чи користувач готовий продовжити оформлення. Так/ні, або якщо користувач хоче щось уточнити, то дай відповідь на його питання.\n5. Якщо користувач відмовляється, запитай чи хоче він надіслати нові фото документів."}
+                {"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування. Інструкції: ..."}
             ]
         user_openaichat[user_id].append({"role": "user", "content": prompt})
         response = client.chat.completions.create(
@@ -147,9 +143,25 @@ async def extract_structured_data_from_ocr(passport_text_raw: str, vehicle_text_
 """
     return await ai_completion(prompt, user_id)
 
+def extract_mrz_data(image_path):
+    try:
+        mrz = read_mrz(image_path)
+        if mrz is None:
+            return None
+        mrz_data = mrz.to_dict()
+        return {
+            "ПІБ": f"{mrz_data.get('names', '')} {mrz_data.get('surname', '')}",
+            "Номер паспорта": mrz_data.get("number", ""),
+            "Дата народження": mrz_data.get("date_of_birth", ""),
+            "Стать": mrz_data.get("sex", ""),
+            "Громадянство": mrz_data.get("nationality", ""),
+        }
+    except Exception as e:
+        return None
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    user_documents[user_id] = {"passport": None, "vehicle": None}
+    user_documents[user_id] = {"passport": None, "vehicle": None, "passport_raw": None, "vehicle_raw": None}
     user_agreement[user_id] = None
     await update.message.reply_text("Привіт! Щоб оформити автостраховку, надішли мені два фото:\n1. 📄 Паспорт\n2. 🚗 Документ на авто")
 
@@ -162,8 +174,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_file = await photos[-1].get_file()
     file_path = os.path.join(IMAGE_DIR, f"{user_id}_{len(os.listdir(IMAGE_DIR))}.jpg")
     await photo_file.download_to_drive(file_path)
+
     if user_documents.get(user_id) is None:
-        user_documents[user_id] = {"passport": None, "vehicle": None}
+        user_documents[user_id] = {"passport": None, "vehicle": None, "passport_raw": None, "vehicle_raw": None}
+
     if user_documents[user_id]["passport"] is None:
         user_documents[user_id]["passport"] = file_path
         await update.message.reply_text("✅ Фото паспорта збережено. Надішли тепер документ на авто.")
@@ -171,39 +185,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_documents[user_id]["vehicle"] = file_path
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
-        if user_documents[user_id]["passport"] and not user_documents[user_id].get("passport_raw"):
-            mrz_data = extract_mrz_data(user_documents[user_id]["passport"])
-            if mrz_data:
-                raw_passport = '\n'.join([f"{key}: {value}" for key, value in mrz_data.items()])
-            else:
-                raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='eng+ukr')
 
-            mrz_data = extract_data_from_mrz(raw_passport)
-            if mrz_data:
-                mrz_text = "\n".join([f"{k}: {v}" for k, v in mrz_data.items()])
+        if not user_documents[user_id]["passport_raw"]:
+            mrz_data = extract_mrz_data(user_documents[user_id]["passport"])
+            raw_passport = '\n'.join([f"{key}: {value}" for key, value in mrz_data.items()]) if mrz_data else extract_text_from_image(user_documents[user_id]["passport"], lang='eng+ukr')
+
+            extra_mrz = extract_data_from_mrz(raw_passport)
+            if extra_mrz:
+                mrz_text = "\n".join([f"{k}: {v}" for k, v in extra_mrz.items()])
                 raw_passport += f"\n\n# Додатково розпізнано з MRZ:\n{mrz_text}"
-            raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
+
             user_documents[user_id]["passport_raw"] = raw_passport
-            user_documents[user_id]["vehicle_raw"] = raw_vehicle
-            structured_info = await extract_structured_data_from_ocr(raw_passport, raw_vehicle, user_id)
+            user_documents[user_id]["vehicle_raw"] = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
+
+            structured_info = await extract_structured_data_from_ocr(user_documents[user_id]["passport_raw"], user_documents[user_id]["vehicle_raw"], user_id)
             user_agreement[user_id] = "awaiting_confirmation"
             await update.message.reply_text("🔍 Ось що я зміг зчитати з ваших документів:\n\n" + structured_info + "\n\nВсе правильно? Відповідай: Так / Ні")
-
-    def extract_mrz_data(image_path):
-        try:
-            mrz = read_mrz(image_path)
-            if mrz is None:
-                return None
-            mrz_data = mrz.to_dict()
-            return {
-                "ПІБ": f"{mrz_data.get('names', '')} {mrz_data.get('surname', '')}",
-                "Номер паспорта": mrz_data.get("number", ""),
-                "Дата народження": mrz_data.get("date_of_birth", ""),
-                "Стать": mrz_data.get("sex", ""),
-                "Громадянство": mrz_data.get("nationality", ""),
-            }
-        except Exception as e:
-            return None
 
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -217,8 +214,8 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_agreement[user_id] = "awaiting_price"
             await update.message.reply_text("💵 Страховка коштує 100 usd. Згодні? Відповідай: Так / Ні")
         elif text == "ні":
-            user_agreement[user_id] = "rejected"
-            user_documents[user_id] = {"passport": None, "vehicle": None}
+            user_agreement[user_id] = None
+            user_documents[user_id] = {"passport": None, "vehicle": None, "passport_raw": None, "vehicle_raw": None}
             await update.message.reply_text("Будь ласка, надішліть нові фото документів.")
         else:
             reply = await ai_completion(text, user_id)
