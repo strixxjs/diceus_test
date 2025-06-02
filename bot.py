@@ -31,20 +31,6 @@ def extract_text_from_image(image_path, lang='eng+ukr'):
     except Exception as e:
         return f"❌ Помилка під час розпізнавання: {e}"
 
-def extract_from_mrz(text):
-    lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 40]
-    if len(lines) >= 2 and lines[0].startswith("P<"):
-        surname_name = lines[0][5:].replace('<', ' ').strip()
-        passport_number = lines[1][0:9].strip()
-        birth_date_raw = lines[1][13:19].strip()
-        birth_date = f"{birth_date_raw[4:6]}.{birth_date_raw[2:4]}.19{birth_date_raw[0:2]}"
-        return {
-            "name": surname_name,
-            "passport_number": passport_number,
-            "birth_date": birth_date
-        }
-    return None
-
 def clean_text(text):
     lines = text.splitlines()
     cleaned = [re.sub(r'[^А-Яа-яA-Za-z0-9 .,/-]', '', line.strip()) for line in lines if line.strip()]
@@ -63,6 +49,33 @@ def normalize_text_line(line):
         else:
             normalized.append(word)
     return ' '.join(normalized)
+
+def extract_data_from_mrz(text: str) -> dict:
+    lines = [line for line in text.strip().splitlines() if line.strip()]
+    if len(lines) < 2:
+        return {}
+
+    line1 = lines[0]
+    line2 = lines[1]
+
+    result = {}
+    if line1.startswith("P<"):
+        try:
+            parts = line1.split("<<")
+            last_first_name = parts[0][2:], parts[1].replace("<", " ")
+            result["ПІБ"] = f"{last_first_name[1]} {last_first_name[0]}".strip()
+        except:
+            pass
+
+    try:
+        passport_number = line2[0:9].replace("<", "")
+        birth_date = line2[13:19]
+        result["Серія і номер паспорта"] = passport_number
+        result["Дата народження"] = f"{birth_date[:2]}.{birth_date[2:4]}.19{birth_date[4:6]}"
+    except:
+        pass
+
+    return result
 
 def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: str) -> str:
     passport_text = clean_text(passport_text)
@@ -157,12 +170,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_documents[user_id]["vehicle"] = file_path
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
-        raw_passport_ocr = extract_text_from_image(user_documents[user_id]["passport"], lang='eng')
-        mrz_data = extract_from_mrz(raw_passport_ocr)
+        raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='eng+ukr')
+        mrz_data = extract_data_from_mrz(raw_passport)
         if mrz_data:
-            raw_passport = f"ПІБ: {mrz_data['name']}\nНомер паспорта: {mrz_data['passport_number']}\nДата народження: {mrz_data['birth_date']}"
-        else:
-            raw_passport = clean_text(raw_passport_ocr)
+            mrz_text = "\n".join([f"{k}: {v}" for k, v in mrz_data.items()])
+            raw_passport += f"\n\n# Додатково розпізнано з MRZ:\n{mrz_text}"
         raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
         user_documents[user_id]["passport_raw"] = raw_passport
         user_documents[user_id]["vehicle_raw"] = raw_vehicle
