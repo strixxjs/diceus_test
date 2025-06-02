@@ -76,7 +76,7 @@ async def ai_completion(prompt: str, user_id: int) -> str:
             user_openaichat[user_id] = [{"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування."}]
         user_openaichat[user_id].append({"role": "user", "content": prompt})
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4.1-nano",
             messages=user_openaichat[user_id],
             temperature=0.7,
             max_tokens=300,
