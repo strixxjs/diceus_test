@@ -73,20 +73,29 @@ def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: st
 async def ai_completion(prompt: str, user_id: int) -> str:
     try:
         if user_id not in user_openaichat:
-            user_openaichat[user_id] = [{"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування."}]
+            user_openaichat[user_id] = [
+                {"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування."}
+            ]
+
         user_openaichat[user_id].append({"role": "user", "content": prompt})
+
         response = openai.ChatCompletion.create(
-            model="gpt-4.1-nano",
+            model="gpt-3.5-turbo",  # змінити на gpt-4, якщо маєш доступ
             messages=user_openaichat[user_id],
             temperature=0.7,
             max_tokens=300,
         )
+
         reply = response.choices[0].message.content.strip()
         user_openaichat[user_id].append({"role": "assistant", "content": reply})
         return reply
+
     except Exception as e:
-        print("❌ OpenAI API error:", e)
+        import traceback
+        print("❌ OpenAI API error:")
+        traceback.print_exc()
         return "⚠️ Виникла помилка з AI. Спробуй пізніше."
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
