@@ -3,3 +3,4 @@ pillow
 pytesseract
 python-dotenv
 rapidfuzz
+openai
