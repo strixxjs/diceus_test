@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -18,17 +19,17 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 user_documents = {}
 user_agreement = {}
 
-def extract_text_from_image(image_path):
+def extract_text_from_image(image_path, lang='eng+ukr'):
     try:
         img = Image.open(image_path)
-        text = pytesseract.image_to_string(img, lang='eng+ukr')
+        text = pytesseract.image_to_string(img, lang=lang)
         return text
     except Exception as e:
         return f"❌ Помилка під час розпізнавання: {e}"
 
 def clean_text(text):
     lines = text.splitlines()
-    cleaned = [line.strip() for line in lines if line.strip()]
+    cleaned = [re.sub(r'[^А-Яа-яA-Za-z0-9 .,/-]', '', line.strip()) for line in lines if line.strip()]
     return '\n'.join(cleaned)
 
 def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: str) -> str:
@@ -87,12 +88,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
 
-        passport_text = extract_text_from_image(user_documents[user_id]["passport"])
-        vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"])
+        passport_text = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
+        vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
 
         response = (
-            "📄 *Паспорт:*\n" + passport_text + "\n\n" +
-            "🚗 *Документ на авто:*\n" + vehicle_text + "\n\n" +
+            "📄 *Паспорт:*\n" + clean_text(passport_text) + "\n\n" +
+            "🚗 *Документ на авто:*\n" + clean_text(vehicle_text) + "\n\n" +
             "Все правильно? Відповідай: Так / Ні"
         )
         user_agreement[user_id] = "awaiting_confirmation"
@@ -123,8 +124,8 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "так":
             await update.message.reply_text("✅ Страховка оформлена! Генерую поліс...")
 
-            passport_text = extract_text_from_image(user_documents[user_id]["passport"])
-            vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"])
+            passport_text = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
+            vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
 
             policy_path = generate_insurance_policy(user_id, passport_text, vehicle_text)
 
