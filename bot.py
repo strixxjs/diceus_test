@@ -149,14 +149,17 @@ def extract_mrz_data(image_path):
         if mrz is None:
             return None
         mrz_data = mrz.to_dict()
+        raw_names = mrz_data.get("names", "").replace("<", " ").strip()
+        raw_surname = mrz_data.get("surname", "").replace("<", " ").strip()
+        full_name = f"{raw_names} {raw_surname}".strip()
         return {
-            "ПІБ": f"{mrz_data.get('names', '')} {mrz_data.get('surname', '')}",
+            "ПІБ": full_name,
             "Номер паспорта": mrz_data.get("number", ""),
             "Дата народження": mrz_data.get("date_of_birth", ""),
             "Стать": mrz_data.get("sex", ""),
             "Громадянство": mrz_data.get("nationality", ""),
         }
-    except Exception as e:
+    except Exception:
         return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
