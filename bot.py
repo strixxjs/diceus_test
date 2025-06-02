@@ -6,19 +6,19 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 from PIL import Image
 import pytesseract
 from rapidfuzz import fuzz, process
+import openai
 
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-if not TOKEN:
-    print("❌ ERROR: TELEGRAM_TOKEN environment variable not set.")
-    exit(1)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 user_documents = {}
 user_agreement = {}
+user_openaichat = {}
 
 known_brands = ["Toyota", "Ford", "Honda", "BMW", "Mercedes", "Nissan", "Audi", "Kia", "Hyundai", "Chevrolet", "Volkswagen", "Mazda", "Subaru", "Tesla", "Jeep"]
 known_states = ["California", "Massachusetts", "New York", "Florida", "Texas", "Illinois", "Ohio", "Pennsylvania", "Georgia", "Nevada", "Arizona", "Colorado"]
@@ -42,7 +42,6 @@ def normalize_text_line(line):
     for word in words:
         brand_match = process.extractOne(word, known_brands, scorer=fuzz.ratio)
         state_match = process.extractOne(word, known_states, scorer=fuzz.ratio)
-
         if brand_match and brand_match[1] >= 80:
             normalized.append(brand_match[0])
         elif state_match and state_match[1] >= 80:
@@ -55,7 +54,6 @@ def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: st
     passport_text = clean_text(passport_text)
     vehicle_text_lines = clean_text(vehicle_text).splitlines()
     vehicle_text = '\n'.join([normalize_text_line(line) for line in vehicle_text_lines])
-
     policy_content = (
         "========== СТРАХОВИЙ ПОЛІС ==========\n\n"
         "👤 ПАСПОРТНІ ДАНІ:\n"
@@ -67,39 +65,46 @@ def generate_insurance_policy(user_id: int, passport_text: str, vehicle_text: st
         "📄 Поліс видано автоматизованою системою\n\n"
         "======================================"
     )
-
     policy_path = os.path.join(IMAGE_DIR, f"{user_id}_policy.txt")
     with open(policy_path, "w", encoding="utf-8") as f:
         f.write(policy_content)
-
     return policy_path
+
+async def ai_completion(prompt: str, user_id: int) -> str:
+    try:
+        if user_id not in user_openaichat:
+            user_openaichat[user_id] = [{"role": "system", "content": "Ти — ввічливий Telegram-бот, який допомагає користувачам оформити автострахування."}]
+        user_openaichat[user_id].append({"role": "user", "content": prompt})
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=user_openaichat[user_id],
+            temperature=0.7,
+            max_tokens=300,
+        )
+        reply = response.choices[0].message.content.strip()
+        user_openaichat[user_id].append({"role": "assistant", "content": reply})
+        return reply
+    except Exception as e:
+        print("❌ OpenAI API error:", e)
+        return "⚠️ Виникла помилка з AI. Спробуй пізніше."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     user_documents[user_id] = {"passport": None, "vehicle": None}
     user_agreement[user_id] = None
-
-    await update.message.reply_text(
-        "Привіт! Щоб оформити автостраховку, надішли мені два фото:\n"
-        "1. 📄 Паспорт\n"
-        "2. 🚗 Документ на авто"
-    )
+    await update.message.reply_text("Привіт! Щоб оформити автостраховку, надішли мені два фото:\n1. 📄 Паспорт\n2. 🚗 Документ на авто")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     photos = update.message.photo
-
     if not photos:
         await update.message.reply_text("Будь ласка, надішли фото документа.")
         return
-
     photo_file = await photos[-1].get_file()
     file_path = os.path.join(IMAGE_DIR, f"{user_id}_{len(os.listdir(IMAGE_DIR))}.jpg")
     await photo_file.download_to_drive(file_path)
-
     if user_documents.get(user_id) is None:
         user_documents[user_id] = {"passport": None, "vehicle": None}
-
     if user_documents[user_id]["passport"] is None:
         user_documents[user_id]["passport"] = file_path
         await update.message.reply_text("✅ Фото паспорта збережено. Надішли тепер документ на авто.")
@@ -107,14 +112,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_documents[user_id]["vehicle"] = file_path
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
-
         raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
         raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
-
         passport_text = clean_text(raw_passport)
         vehicle_text_lines = clean_text(raw_vehicle).splitlines()
         vehicle_text = '\n'.join([normalize_text_line(line) for line in vehicle_text_lines])
-
         response = (
             "📄 *Паспорт:*\n" + passport_text + "\n\n" +
             "🚗 *Документ на авто:*\n" + vehicle_text + "\n\n" +
@@ -126,13 +128,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip().lower()
-
     if user_id not in user_agreement:
         await update.message.reply_text("Спочатку надішли документи через /start.")
         return
-
     status = user_agreement[user_id]
-
     if status == "awaiting_confirmation":
         if text == "так":
             user_agreement[user_id] = "awaiting_price"
@@ -142,28 +141,26 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_documents[user_id] = {"passport": None, "vehicle": None}
             await update.message.reply_text("Будь ласка, надішліть нові фото документів.")
         else:
-            await update.message.reply_text("Будь ласка, відповідай 'Так' або 'Ні'.")
-
+            reply = await ai_completion(text, user_id)
+            await update.message.reply_text(reply)
     elif status == "awaiting_price":
         if text == "так":
             await update.message.reply_text("✅ Страховка оформлена! Генерую поліс...")
-
             passport_text = extract_text_from_image(user_documents[user_id]["passport"], lang='ukr')
             vehicle_text = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
-
             policy_path = generate_insurance_policy(user_id, passport_text, vehicle_text)
-
             with open(policy_path, "rb") as f:
                 await update.message.reply_document(f, filename="insurance_policy.txt")
-
             await update.message.reply_text("📄 Готово! Ваш страховий поліс надіслано.")
             user_agreement[user_id] = "done"
         elif text == "ні":
             await update.message.reply_text("❌ Вибачте, ціна фіксована.")
         else:
-            await update.message.reply_text("Будь ласка, відповідай 'Так' або 'Ні'.")
+            reply = await ai_completion(text, user_id)
+            await update.message.reply_text(reply)
     else:
-        await update.message.reply_text("Не розумію. Напиши /start щоб почати спочатку.")
+        reply = await ai_completion(text, user_id)
+        await update.message.reply_text(reply)
 
 async def handle_invalid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Я приймаю лише фото паспорта та авто-документа. Надішліть, будь ласка, зображення.")
