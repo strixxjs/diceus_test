@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from PIL import Image
+from passporteye import read_mrz
 import pytesseract
 from rapidfuzz import fuzz, process
 import openai
@@ -170,17 +171,39 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_documents[user_id]["vehicle"] = file_path
         await update.message.reply_text("✅ Фото авто-документа збережено. Дякую!")
         await update.message.reply_text("🔍 Зчитую інформацію з документів...")
-        raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='eng+ukr')
-        mrz_data = extract_data_from_mrz(raw_passport)
-        if mrz_data:
-            mrz_text = "\n".join([f"{k}: {v}" for k, v in mrz_data.items()])
-            raw_passport += f"\n\n# Додатково розпізнано з MRZ:\n{mrz_text}"
-        raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
-        user_documents[user_id]["passport_raw"] = raw_passport
-        user_documents[user_id]["vehicle_raw"] = raw_vehicle
-        structured_info = await extract_structured_data_from_ocr(raw_passport, raw_vehicle, user_id)
-        user_agreement[user_id] = "awaiting_confirmation"
-        await update.message.reply_text("🔍 Ось що я зміг зчитати з ваших документів:\n\n" + structured_info + "\n\nВсе правильно? Відповідай: Так / Ні")
+        if user_documents[user_id]["passport"] and not user_documents[user_id].get("passport_raw"):
+            mrz_data = extract_mrz_data(user_documents[user_id]["passport"])
+            if mrz_data:
+                raw_passport = '\n'.join([f"{key}: {value}" for key, value in mrz_data.items()])
+            else:
+                raw_passport = extract_text_from_image(user_documents[user_id]["passport"], lang='eng+ukr')
+
+            mrz_data = extract_data_from_mrz(raw_passport)
+            if mrz_data:
+                mrz_text = "\n".join([f"{k}: {v}" for k, v in mrz_data.items()])
+                raw_passport += f"\n\n# Додатково розпізнано з MRZ:\n{mrz_text}"
+            raw_vehicle = extract_text_from_image(user_documents[user_id]["vehicle"], lang='eng')
+            user_documents[user_id]["passport_raw"] = raw_passport
+            user_documents[user_id]["vehicle_raw"] = raw_vehicle
+            structured_info = await extract_structured_data_from_ocr(raw_passport, raw_vehicle, user_id)
+            user_agreement[user_id] = "awaiting_confirmation"
+            await update.message.reply_text("🔍 Ось що я зміг зчитати з ваших документів:\n\n" + structured_info + "\n\nВсе правильно? Відповідай: Так / Ні")
+
+    def extract_mrz_data(image_path):
+        try:
+            mrz = read_mrz(image_path)
+            if mrz is None:
+                return None
+            mrz_data = mrz.to_dict()
+            return {
+                "ПІБ": f"{mrz_data.get('names', '')} {mrz_data.get('surname', '')}",
+                "Номер паспорта": mrz_data.get("number", ""),
+                "Дата народження": mrz_data.get("date_of_birth", ""),
+                "Стать": mrz_data.get("sex", ""),
+                "Громадянство": mrz_data.get("nationality", ""),
+            }
+        except Exception as e:
+            return None
 
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
