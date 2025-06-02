@@ -83,7 +83,7 @@ async def ai_completion(prompt: str, user_id: int) -> str:
         user_openaichat[user_id].append({"role": "user", "content": prompt})
 
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # або "gpt-4" якщо маєш доступ
+            model="gpt-4.1-nano",
             messages=user_openaichat[user_id],
             temperature=0.7,
             max_tokens=300,
